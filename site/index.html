@@ -1,0 +1,1556 @@
+<!-- /index.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GeoCode - Inteligência Territorial</title>
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Chart.js para o Dashboard -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- TURF.JS: Essencial para análise espacial (Contar pontos dentro de polígonos) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    /* BANNER DE FUNDO COM EFEITO EMBAÇADO */
+    body {
+      background-image: url('https://raw.githubusercontent.com/marciodemelosilvageo-glitch/GeoCode/main/logo/banner-mock.webp');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      position: relative;
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 0.3);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: -1;
+    }
+
+    #map { height: 65vh; } /* Ajuste de altura para acomodar o dashboard */
+    .leaflet-control-layers { border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.15); border: 1px solid #d1d5db; }
+    #search-results-list, #selected-features-list, #layers-list { max-height: 26vh; overflow-y: auto; }
+    .info.legend { line-height: 18px; color: #374151; background: white; padding: 10px 12px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.15); border: 1px solid #e5e7eb; }
+    .info.legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.9; border-radius: 4px; }
+    summary::-webkit-details-marker{display:none}
+    
+    /* Scrollbar fina para a lista de crimes */
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #aaa; }
+  </style>
+</head>
+<body class="flex flex-col items-center min-h-screen p-4 space-y-4">
+  
+  <!-- Quadro principal -->
+  <div class="w-full w-[98%] bg-white rounded-2xl shadow-xl p-6 space-y-4">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row items-center justify-between gap-4 border-b pb-3">
+      <div class="flex items-center gap-3">
+        <img src="https://raw.githubusercontent.com/marciodemelosilvageo-glitch/GeoCode/main/logo/image-Photoroom.png" alt="Logo GeoCode" class="h-14" />
+      </div>
+
+      <div class="w-full md:w-auto flex flex-col items-end gap-2">
+        <div class="flex items-center self-end" title="Busca somente nas camadas ativas">
+          <input id="search-active-layers-toggle" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+          <label for="search-active-layers-toggle" class="ml-2 text-xs text-gray-600">Pesquisar apenas nas camadas ativas</label>
+        </div>
+
+        <div class="w-full flex items-center gap-2">
+          <div class="flex rounded-lg shadow-sm flex-grow">
+            <input type="text" id="search-input" placeholder="Pesquisar (nome, código, etc.)" autocomplete="off"
+                   class="w-full md:w-96 px-4 py-2 text-gray-700 bg-gray-50 border border-gray-300 rounded-l-md focus:outline-none focus:ring-blue-600 focus:border-blue-600"/>
+            <button id="search-button" class="px-3 bg-indigo-600 text-white font-semibold rounded-r-md hover:bg-indigo-700 disabled:opacity-50" title="Pesquisar" aria-label="Pesquisar">
+              <svg id="search-icon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+              <svg id="search-spinner" class="hidden animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="flex items-center justify-between gap-2">
+      <div id="active-layer-display" class="w-full text-center py-2 text-slate-700 bg-slate-100 rounded-md text-sm" aria-live="polite">
+        Camadas ativas: nenhuma
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-all-on" class="px-3 py-1 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm" title="Ligar todas">Ligar tudo</button>
+        <button id="btn-all-off" class="px-3 py-1 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm" title="Desligar todas">Desligar tudo</button>
+      </div>
+    </div>
+
+    <!-- Resultados de busca -->
+    <div id="search-results-container" class="hidden w-full bg-white rounded-xl border border-gray-200 shadow-sm mt-2 p-3 space-y-2" aria-live="polite">
+      <div class="flex justify-between items-center">
+        <small id="search-results-title" class="text-slate-600"></small>
+        <button id="abandon-search-button" class="text-gray-500 hover:text-red-600" title="Limpar busca" aria-label="Limpar busca">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="search-results-list" role="list"></div>
+    </div>
+
+    <!-- Mapa -->
+    <div id="map" class="w-full rounded-xl border-2 border-gray-200 shadow-inner relative" role="region" aria-label="Mapa interativo">
+      <div id="loading-overlay" class="absolute inset-0 bg-white bg-opacity-80 flex items-center justify-center z-[1000]">
+        <div class="text-center">
+          <svg class="animate-spin h-8 w-8 text-indigo-700 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <p id="status" class="text-slate-700 mt-2 text-sm" role="status" aria-live="polite">Carregando dados...</p>
+        </div>
+      </div>
+
+      <!-- Controles Customizados -->
+      <div class="absolute top-3 right-3 z-[1000] flex flex-col items-end gap-2">
+        <div class="bg-white rounded-md shadow-lg border border-gray-200 p-2 flex gap-2 items-center">
+          <label class="text-sm text-slate-700">Fundo</label>
+          <select id="basemap-select" class="text-sm border rounded-md px-2 py-1">
+            <option value="osm">OSM</option>
+            <option value="esri">Esri World Imagery</option>
+            <option value="carto">Carto Light</option>
+          </select>
+        </div>
+        
+        <div id="custom-layers-control" class="flex items-start">
+          <button id="toggle-layers-btn" class="bg-white p-2 rounded-md shadow-lg hover:bg-gray-100" title="Abrir painel de camadas" aria-expanded="false">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-gray-700"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          </button>
+          <div id="layers-panel" class="hidden bg-white rounded-md shadow-xl ml-2 max-w-xs border border-gray-200">
+            <div class="p-2 flex gap-2 border-b">
+              <button id="btn-expand-all" class="px-2 py-1 bg-slate-100 rounded text-xs">Expandir</button>
+              <button id="btn-collapse-all" class="px-2 py-1 bg-slate-100 rounded text-xs">Recolher</button>
+            </div>
+            <div id="layers-list" class="p-2 space-y-1"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTÃO DE AJUDA (NOVO) -->
+    <div class="flex justify-end mt-2">
+        <button id="help-button" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors shadow-md text-sm font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Ajuda / Como Usar
+        </button>
+    </div>
+  </div>
+
+  <!-- MODAL DE AJUDA (NOVO) -->
+  <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 z-[2000] hidden flex items-center justify-center p-4">
+      <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 relative animate-[fadeIn_0.2s_ease-in-out]">
+          <button id="close-help-modal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+          </button>
+          
+          <h3 class="text-xl font-bold text-indigo-700 mb-4 flex items-center gap-2 border-b pb-3">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              Guia Rápido de Uso
+          </h3>
+          
+          <div class="space-y-5 text-slate-600">
+              <div class="flex gap-3">
+                  <div class="flex-shrink-0 mt-1">
+                      <span class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold text-sm">1</span>
+                  </div>
+                  <div>
+                      <p class="font-semibold text-slate-800 text-lg">Visualizar Dados</p>
+                      <p class="text-sm leading-relaxed">Clique em qualquer feição no mapa (Município, Bairro, AISP, etc.) para carregar os indicadores de habitação e segurança no painel.</p>
+                  </div>
+              </div>
+
+              <div class="flex gap-3">
+                  <div class="flex-shrink-0 mt-1">
+                      <span class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold text-sm">2</span>
+                  </div>
+                  <div>
+                      <p class="font-semibold text-slate-800 text-lg flex items-center gap-2">
+                          Seleção Múltipla 
+                          <span class="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded border border-gray-300 font-mono">Ctrl</span>
+                      </p>
+                      <p class="text-sm leading-relaxed">Segure a tecla <strong>Ctrl</strong> (ou Cmd no Mac) enquanto clica para selecionar várias áreas. O painel somará automaticamente os dados de todas as áreas selecionadas.</p>
+                  </div>
+              </div>
+              
+              <div class="flex gap-3">
+                  <div class="flex-shrink-0 mt-1">
+                      <span class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold text-sm">3</span>
+                  </div>
+                  <div>
+                      <p class="font-semibold text-slate-800 text-lg">Filtros de Segurança</p>
+                      <p class="text-sm leading-relaxed">No cartão de "Ocorrências", use os filtros de <strong>Ano, Mês e Dia</strong> para refinar a análise criminal da área selecionada em tempo real.</p>
+                  </div>
+              </div>
+          </div>
+
+          <div class="mt-8 text-right bg-gray-50 -mx-6 -mb-6 p-4 rounded-b-xl border-t">
+              <button id="close-help-btn-action" class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium shadow transition-transform transform active:scale-95">Entendi, vamos começar!</button>
+          </div>
+      </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- DASHBOARD DE INTELIGÊNCIA TERRITORIAL -->
+  <!-- ========================================== -->
+  <div id="dashboard-container" class="hidden w-full w-[98%] bg-slate-50 rounded-2xl shadow-xl p-6 border border-slate-200">
+    <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-bold text-slate-800 border-l-4 border-indigo-600 pl-3">
+            Raio-X Domiciliar e Segurança: <span id="dash-local-name" class="text-indigo-600 font-normal">Selecione um local</span>
+        </h2>
+    </div>
+
+    <!-- LINHA 1: KPIs -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <!-- Card 1 -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center hover:shadow-md transition-shadow">
+            <div class="p-3 rounded-full bg-blue-100 text-blue-600 mr-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wide">População Total</p>
+                <p id="dash-pop" class="text-2xl font-bold text-slate-800">---</p>
+                <p id="dash-dens" class="text-xs text-indigo-500 font-medium">--- mor./dom</p>
+            </div>
+        </div>
+
+        <!-- Card 2 -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center hover:shadow-md transition-shadow">
+            <div class="p-3 rounded-full bg-emerald-100 text-emerald-600 mr-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wide">Total Domicílios</p>
+                <p id="dash-dom-total" class="text-2xl font-bold text-slate-800">---</p>
+                <p class="text-xs text-slate-400">Cadastrados</p>
+            </div>
+        </div>
+
+        <!-- Card 3 (Vacância) -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center hover:shadow-md transition-shadow relative overflow-hidden">
+            <div class="absolute right-0 top-0 h-full w-1 bg-orange-500"></div>
+            <div class="p-3 rounded-full bg-orange-100 text-orange-600 mr-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wide">Vagos / Ocasional</p>
+                <p id="dash-vagos" class="text-2xl font-bold text-orange-600">---</p>
+                <p id="dash-taxa-vac" class="text-xs text-orange-500 font-bold">Taxa: ---%</p>
+            </div>
+        </div>
+
+        <!-- Card 4 -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center hover:shadow-md transition-shadow">
+            <div class="p-3 rounded-full bg-slate-100 text-slate-600 mr-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+            </div>
+            <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wide">Dom. Coletivos</p>
+                <p id="dash-coletivos" class="text-2xl font-bold text-slate-800">---</p>
+                <p class="text-xs text-slate-400">Instituições</p>
+            </div>
+        </div>
+
+        <!-- Card 5 (Segurança / Crimes) - EXPANDIDO (Full Width) com Filtros e LISTA -->
+        <div class="col-span-1 sm:col-span-2 lg:col-span-4 bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-start justify-between hover:shadow-md transition-shadow border-l-4 border-red-600 relative">
+            
+            <!-- FILTROS (Posicionados no topo à direita dentro do card) -->
+            <div class="absolute top-3 right-4 flex gap-2 z-10 flex-wrap justify-end">
+                <select id="filter-year" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-500">
+                    <option value="all">Ano: Todos</option>
+                </select>
+                <select id="filter-month" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-500">
+                    <option value="all">Mês: Todos</option>
+                    <option value="1">Janeiro</option>
+                    <option value="2">Fevereiro</option>
+                    <option value="3">Março</option>
+                    <option value="4">Abril</option>
+                    <option value="5">Maio</option>
+                    <option value="6">Junho</option>
+                    <option value="7">Julho</option>
+                    <option value="8">Agosto</option>
+                    <option value="9">Setembro</option>
+                    <option value="10">Outubro</option>
+                    <option value="11">Novembro</option>
+                    <option value="12">Dezembro</option>
+                </select>
+                <select id="filter-day" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-red-500">
+                    <option value="all">Dia: Todos</option>
+                </select>
+            </div>
+
+            <!-- Esquerda: Totalizador e Explicação -->
+            <div class="flex flex-col w-full md:w-1/3 mb-4 md:mb-0 mt-6 md:mt-0">
+                <div class="flex items-center mb-2">
+                    <!-- ÁREA DO ÍCONE COM CLASSE 'group' PARA ANIMAÇÃO NO HOVER -->
+                    <div class="p-4 rounded-full bg-red-100 text-red-600 mr-5 group cursor-pointer relative overflow-visible" title="Viatura Policial">
+                        
+                        <!-- Efeito de 'Onda' (Ping) Vermelha atrás -->
+                        <div class="absolute inset-0 bg-red-400 rounded-full opacity-0 group-hover:animate-ping"></div>
+
+                        <!-- ÍCONE VIATURA -->
+                        <!-- A classe group-hover:translate-x-1 faz o carro "andar" levemente para frente -->
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-red-600 relative z-10 transition-transform duration-300 group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            
+                            <!-- Barra de Luzes (Siren Lights) - Invisível por padrão, pisca no hover -->
+                            <!-- Luz Vermelha (Esquerda) -->
+                            <path d="M7 4h3v2H7z" class="fill-red-600 stroke-none opacity-0 group-hover:opacity-100 group-hover:animate-pulse" />
+                            <!-- Luz Azul (Direita) - Para dar efeito de polícia -->
+                            <path d="M14 4h3v2h-3z" class="fill-blue-600 stroke-none opacity-0 group-hover:opacity-100 group-hover:animate-pulse" style="animation-delay: 0.1s;" />
+                            
+                            <!-- Corpo do Carro -->
+                            <path d="M5 17h-2v-6l2-5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5" />
+                            
+                            <!-- Rodas -->
+                            <circle cx="9" cy="17" r="2" />
+                            <circle cx="19" cy="17" r="2" />
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-sm text-slate-500 uppercase tracking-wide font-bold">Total de Ocorrências</p>
+                        <p id="dash-crimes" class="text-4xl font-bold text-red-700">---</p>
+                        <p id="dash-crimes-info" class="text-sm text-slate-400 font-semibold">Na área selecionada</p>
+                    </div>
+                </div>
+                <!-- Explicação pequena -->
+                <p class="text-[10px] text-slate-400 leading-tight mt-1 text-justify pr-2">
+                    * A taxa por 100k hab. indica a intensidade da violência proporcionalmente à população, permitindo comparar áreas de tamanhos diferentes.
+                </p>
+            </div>
+
+            <!-- Direita: Lista de Tipologias (TODAS) -->
+            <div class="w-full md:flex-1 md:ml-6 border-t md:border-t-0 md:border-l border-slate-200 pt-4 md:pt-0 md:pl-6 mt-4 md:mt-0">
+                <p class="text-xs font-semibold text-slate-500 uppercase mb-2">Naturezas Registradas (Filtro Ativo):</p>
+                <!-- Container com scroll para caber muitas naturezas -->
+                <div class="max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                    <ul id="crime-top-list" class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm text-slate-700">
+                        <li class="text-slate-400 italic">Nenhum dado selecionado.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    
+    <!-- (LINHA 2 DE GRÁFICOS REMOVIDA) -->
+
+  </div>
+  <!-- FIM DO DASHBOARD -->
+
+  <!-- Seleção -->
+  <div id="selected-features-container" class="hidden w-full w-[98%] bg-white rounded-2xl shadow-xl p-4">
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">Feições Selecionadas</h3>
+    <div id="selected-features-list"></div>
+  </div>
+
+  <!-- Tabela de propriedades -->
+  <div id="info-table-container" class="w-full w-[98%] bg-white rounded-2xl shadow-xl p-4 hidden">
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">Especificação das Feições</h3>
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-3">
+      <div class="flex gap-2">
+        <button id="export-csv-button" class="px-3 py-1.5 bg-emerald-600 text-white font-semibold rounded-md hover:bg-emerald-700 text-sm" title="Exportar CSV">CSV</button>
+        <button id="export-kml-button" class="px-3 py-1.5 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 text-sm" title="Exportar KML">KML</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th scope="col" class="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Propriedade</th>
+            <th scope="col" class="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
+          </tr>
+        </thead>
+        <tbody id="info-table-body" class="bg-white divide-y divide-gray-200">
+          <tr><td colspan="2" class="px-6 py-4 text-center text-gray-500">Clique em um elemento no mapa.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="individual-details-container" class="hidden mt-3"></div>
+  </div>
+
+  <!-- Rodapé -->
+  <footer class="w-full w-[98%] mt-2 text-center text-gray-600 pb-4">
+    <div class="bg-white rounded-2xl shadow-xl p-4">
+      <div class="flex justify-center items-center gap-8">
+        <img src="https://raw.githubusercontent.com/marciodemelosilvageo-glitch/GeoCode/main/logo/IBGE.png" alt="Logo IBGE" class="h-8"/>
+        <img src="https://raw.githubusercontent.com/marciodemelosilvageo-glitch/GeoCode/main/logo/image-removebg-preview.png" alt="Logo SSP" class="h-12"/>
+        <img src="https://raw.githubusercontent.com/marciodemelosilvageo-glitch/GeoCode/main/logo/image-Photoroom.png" alt="Logo Gerência de Dados Cartográficos" class="h-14"/>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    // ---------- Utils ----------
+    const escapeHtml = (s) => String(s).replace(/[&<>"'`=\\/]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;','=':'&#61;','/':'&#47;'}[ch]));
+    const escapeXml  = (s) => String(s).replace(/[<>&'"]/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;'}[ch]));
+    const sanitizeFilename = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '_').slice(0,120);
+    const debounce = (fn, ms=300) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+    const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+
+    // ---------- DOM ----------
+    const statusEl = document.getElementById('status');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const tableContainer = document.getElementById('info-table-container');
+    const tableBody = document.getElementById('info-table-body');
+    const searchInput = document.getElementById('search-input');
+    const searchButton = document.getElementById('search-button');
+    const searchIcon = document.getElementById('search-icon');
+    const searchSpinner = document.getElementById('search-spinner');
+    const activeLayerDisplay = document.getElementById('active-layer-display');
+    const exportCsvButton = document.getElementById('export-csv-button');
+    const exportKmlButton = document.getElementById('export-kml-button');
+    const searchResultsContainer = document.getElementById('search-results-container');
+    const searchResultsTitle = document.getElementById('search-results-title');
+    const searchResultsList = document.getElementById('search-results-list');
+    const abandonSearchButton = document.getElementById('abandon-search-button');
+    const searchActiveLayersToggle = document.getElementById('search-active-layers-toggle');
+    const selectedFeaturesContainer = document.getElementById('selected-features-container');
+    const selectedFeaturesList = document.getElementById('selected-features-list');
+    const individualDetailsContainer = document.getElementById('individual-details-container');
+    const toggleLayersBtn = document.getElementById('toggle-layers-btn');
+    const layersPanel = document.getElementById('layers-panel');
+    const layersList = document.getElementById('layers-list');
+    const btnAllOn = document.getElementById('btn-all-on');
+    const btnAllOff = document.getElementById('btn-all-off');
+    const btnExpandAll = document.getElementById('btn-expand-all');
+    const btnCollapseAll = document.getElementById('btn-collapse-all');
+    const basemapSelect = document.getElementById('basemap-select');
+    
+    // Dashboard Elements & Filters
+    const dashboardContainer = document.getElementById('dashboard-container');
+    const crimeTopList = document.getElementById('crime-top-list');
+    const filterYear = document.getElementById('filter-year');
+    const filterMonth = document.getElementById('filter-month');
+    const filterDay = document.getElementById('filter-day'); // Seleciona o novo filtro de dia
+
+    // Help Modal Logic
+    const helpButton = document.getElementById('help-button');
+    const helpModal = document.getElementById('help-modal');
+    const closeHelpModal = document.getElementById('close-help-modal');
+    const closeHelpBtnAction = document.getElementById('close-help-btn-action');
+
+    function toggleHelpModal() {
+        helpModal.classList.toggle('hidden');
+    }
+
+    if(helpButton) helpButton.addEventListener('click', toggleHelpModal);
+    if(closeHelpModal) closeHelpModal.addEventListener('click', toggleHelpModal);
+    if(closeHelpBtnAction) closeHelpBtnAction.addEventListener('click', toggleHelpModal);
+    
+    // Close on click outside
+    if(helpModal) helpModal.addEventListener('click', (e) => {
+        if (e.target === helpModal) toggleHelpModal();
+    });
+
+    // Popula o filtro de dias (1-31)
+    for(let i=1; i<=31; i++){
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.innerText = i;
+        filterDay.appendChild(opt);
+    }
+
+    // ---------- Estilos/legendas ----------
+    const getSectorsPopulationColor = d => d>2000?'#B10026':d>1500?'#E31A1C':d>1000?'#FC4E2A':d>750?'#FD8D3C':d>500?'#FEB24C':d>250?'#FED976':d>100?'#FFFFB2':'#FFFFE5';
+    const getAreaDevColor = d => d>389168?'#800026':d>218862?'#B10026':d>170528?'#E31A1C':d>127442?'#FC4E2A':d>112096?'#FD8D3C':d>88281?'#FEB24C':'#FFFFE5';
+    const getGeneralPopulationColor = d => d>200000?'#800026':d>100000?'#BD0026':d>50000?'#E31A1C':d>20000?'#FC4E2A':d>10000?'#FD8D3C':d>5000?'#FEB24C':d>1000?'#FED976':'#FFEDA0';
+    
+    const thematicStyleGeneral = f => ({ fillColor:getGeneralPopulationColor(f.properties['Total de pessoas']||0), weight:1, opacity:1, color:'black', fillOpacity:.7 });
+    const thematicStyleSectors = f => ({ fillColor:getSectorsPopulationColor(f.properties['Total de pessoas']||0),  weight:1, opacity:1, color:'black', fillOpacity:.7 });
+    const thematicStyleAreaDev = f => ({ fillColor:getAreaDevColor(f.properties['Total de pessoas']||0),             weight:1, opacity:1, color:'black', fillOpacity:.7 });
+
+    const layerStyles = {
+      "Situação (Urbana/Rural)": thematicStyleGeneral,
+      "Situação detalhada - Nivel Municipio": thematicStyleGeneral,
+      "Situação detalhada - Nivel Bairros": thematicStyleSectors,
+      "Tipo do Setor - Nivel Municipio": thematicStyleGeneral,
+      "Tipo do Setor - Nivel Bairros": thematicStyleSectors,
+      "Municipios": thematicStyleGeneral,
+      "Subdistritos": thematicStyleGeneral,
+      "Bairros": thematicStyleSectors,
+      "Núcleos Urbanos": thematicStyleSectors,
+      "Favelas e Comunidades": thematicStyleSectors,
+      "Aglomerados Rurais": thematicStyleGeneral,
+      "Regiões Intermediárias": thematicStyleGeneral,
+      "Regiões Imediatas": thematicStyleGeneral,
+      "RISP": thematicStyleGeneral,
+      "Comunidades Rurais de Teresina": thematicStyleSectors,
+      "Áreas de Desenvolvimento": thematicStyleAreaDev,
+      "AISP": thematicStyleGeneral
+    };
+
+    // ---------- Dicionários Oficiais ----------
+    const situationMap = {
+      "1": "Área urbana de alta densidade de edificações",
+      "2": "Área urbana de baixa densidade de edificações",
+      "3": "Núcleo urbano",
+      "4": "Área rural (exclusive aglomerados)", 
+      "5": "Aglomerado rural - Povoado",
+      "6": "Aglomerado rural - Núcleo rural",
+      "7": "Aglomerado rural - Lugarejo",
+      "8": "Área rural (exclusive aglomerados)",
+      "9": "Massas de água"
+    };
+
+    const typeMap = {
+      "0": "Não especial",
+      "1": "Favela e Comunidade Urbana",
+      "2": "Quartel e base militar",
+      "3": "Alojamento / acampamento",
+      "4": "Setor com baixo patamar domiciliar",
+      "5": "Agrupamento indígena",
+      "6": "Unidade prisional",
+      "7": "Convento/hospital/ILPI/IACA",
+      "8": "Agrovila do PA",
+      "9": "Agrupamento quilombola"
+    };
+
+    // ---------- Fontes ----------
+    const dataSources = [
+      { name: "Situação (Urbana/Rural)", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/SITUACAO.geojson', popupProperty: 'SITUACAO' },
+      { name: "Situação detalhada - Nivel Municipio", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Situa%C3%A7%C3%A3o%20detalhada%20-%20Nivel%20Municipio.geojson', popupProperty: 'CD_SIT' },
+      { name: "Situação detalhada - Nivel Bairros", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Situa%C3%A7%C3%A3o%20detalhada%20-%20Nivel%20Bairros.geojson', popupProperty: 'CD_SIT' },
+      { name: "Tipo do Setor - Nivel Municipio", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Tipo%20do%20Setor%20-%20Nivel%20Municipio.geojson', popupProperty: 'CD_TIPO' },
+      { name: "Tipo do Setor - Nivel Bairros", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Tipo%20do%20Setor%20-%20Nivel%20Bairros.geojson', popupProperty: 'CD_TIPO' },
+      { name: "Municipios", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_MUN.geojson', popupProperty: 'NM_MUN' },
+      { name: "Subdistritos", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_SUBDIST.geojson', popupProperty: 'NM_SUBDIST' },
+      { name: "Bairros", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_BAIRRO.geojson', popupProperty: 'NM_BAIRRO' },
+      { name: "Núcleos Urbanos", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_NU.geojson', popupProperty: 'NM_NU' },
+      { name: "Favelas e Comunidades", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_FCU.geojson', popupProperty: 'NM_FCU' },
+      { name: "Aglomerados Rurais", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_AGLOM.geojson', popupProperty: 'NM_AGLOM' },
+      { name: "Regiões Intermediárias", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_RGINT.geojson', popupProperty: 'NM_RGINT' },
+      { name: "Regiões Imediatas", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/NM_RGI.geojson', popupProperty: 'NM_RGI' },
+      { name: "RISP", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Risp.geojson', popupProperty: 'Risp' },
+      { name: "Comunidades Rurais de Teresina", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Comunidades%20rurais%20de%20teresina.geojson', popupProperty: 'Nome' },
+      { name: "Áreas de Desenvolvimento", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Area%20de%20desenvolvimento.geojson', popupProperty: 'Area de desenvolvimento' },
+      { name: "AISP", url: 'https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Aisp.geojson', popupProperty: 'Aisp' }
+    ].map(s => ({ ...s, style: layerStyles[s.name] || thematicStyleGeneral }));
+
+    // Nomes legíveis
+    const propertyNames = {
+      'CD_SETOR':'Geocódigo de Setor Censitário',
+      'SITUACAO':'Situação (Urbana/Rural)',
+      'CD_SIT':'Situação Detalhada', 
+      'CD_TIPO':'Tipo do Setor', 
+      'Risp':'RISP',
+      'Area de desenvolvimento':'Área de Desenvolvimento',
+      'AREA_KM2':'Área (km²)',
+      'CD_REGIAO':'Código da Grande Região','NM_REGIAO':'Nome da Grande Região',
+      'CD_UF':'Código da UF','NM_UF':'Nome da UF',
+      'CD_MUN':'Código do Município','NM_MUN':'Nome do Município',
+      'CD_DIST':'Código do Distrito','NM_DIST':'Nome do Distrito',
+      'CD_SUBDIST':'Código do Subdistrito','NM_SUBDIST':'Nome do Subdistrito',
+      'CD_BAIRRO':'Código do Bairro','NM_BAIRRO':'Nome do Bairro',
+      'CD_NU':'Código do Núcleo Urbano','NM_NU':'Nome do Núcleo Urbano',
+      'CD_FCU':'Código da Favela/Com. Urbana','NM_FCU':'Nome da Favela/Com. Urbana',
+      'CD_AGLOM':'Código do Aglomerado','NM_AGLOM':'Nome do Aglomerado',
+      'CD_RGINT':'Código da RG Intermediária','NM_RGINT':'Nome da RG Intermediária',
+      'CD_RGI':'Código da RG Imediata','NM_RGI':'Nome da RG Imediata',
+      'CD_CONCURB':'Código da Concentração Urbana','NM_CONCURB':'Nome da Concentração Urbana',
+      'NM_TIPO':'Tipo Descritivo','NM_SIT':'Situação Descritiva',
+      'Aisp':'AISP',
+      'V0001': 'Total de pessoas',
+      'V0002': 'Total de Domicílios (Particulares + Coletivos)',
+      'V0003': 'Total de Domicílios Particulares',
+      'V0004': 'Total de Domicílios Coletivos',
+      'V0005': 'Média de moradores em Dom. Particulares Ocupados',
+      'V0006': 'Percentual de Dom. Particulares Ocupados Imputados',
+      'V0007': 'Total de Domicílios Particulares Ocupados',
+      'Total de pessoas':'Total de pessoas',
+      'Nome':'Nome'
+    };
+
+    // ---------- Mapa ----------
+    const map = L.map('map').setView([-5.09, -42.8], 7);
+
+    const basemaps = {
+      osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }),
+      esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri' }),
+      carto: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; Carto' })
+    };
+    basemaps.osm.addTo(map);
+
+    basemapSelect.addEventListener('change', ()=>{
+      Object.values(basemaps).forEach(b=> map.removeLayer(b));
+      const k = basemapSelect.value; (basemaps[k]||basemaps.osm).addTo(map);
+    });
+
+    let loadedLayers = {};          
+    let selectedLayers = new Set();
+    
+    // Variáveis Globais de Crimes
+    let globalCrimeData = null; // Armazena o GeoJSON de crimes
+
+    // CONFIGURAÇÃO DA FONTE DE DADOS
+    // Opção A: GitHub (Atual) - Arquivo estático
+    // Opção B: API Interna (PostgreSQL) - Cole o link da sua API interna aqui quando tiver
+    const DATA_SOURCE = 'GITHUB'; // Mude para 'API' se for usar o banco
+
+    // --- LÓGICA DE CARREGAMENTO DE CRIMES ---
+    async function loadCrimeDataBackground() {
+        try {
+            let url = "";
+            
+            if (DATA_SOURCE === 'GITHUB') {
+                // Link do seu GitHub (Funcionando agora)
+                url = "https://raw.githubusercontent.com/marciodemelosilvageo-glitch/web/main/geojsom/Crimes.geojson";
+            } else if (DATA_SOURCE === 'API') {
+                // [FUTURO] Coloque o link da sua API interna aqui
+                // Exemplo: "http://192.168.1.50:3000/api/crimes" 
+                // A API precisa retornar um JSON ou GeoJSON com a mesma estrutura
+                url = "http://SEU_SERVIDOR_INTERNO/api/crimes"; 
+                console.log("Tentando conectar na API interna...");
+            }
+
+            const resp = await fetch(url);
+            if(resp.ok) {
+                globalCrimeData = await resp.json();
+                console.log("Base de Crimes carregada: " + globalCrimeData.features.length + " registros.");
+                populateYearFilter();
+            } else {
+                console.error("Erro ao baixar dados: " + resp.status);
+            }
+        } catch (e) {
+            console.error("Erro ao carregar dados de crimes", e);
+        }
+    }
+
+    // --- PREENCHER FILTRO DE ANOS DINAMICAMENTE ---
+    function populateYearFilter() {
+        if (!globalCrimeData) return;
+        const years = new Set();
+        globalCrimeData.features.forEach(f => {
+            if (f.properties.ano_oco) years.add(f.properties.ano_oco);
+        });
+        
+        // Ordena anos decrescente
+        const sortedYears = Array.from(years).sort((a,b) => b - a);
+        
+        filterYear.innerHTML = '<option value="all">Ano: Todos</option>';
+        sortedYears.forEach(year => {
+            const opt = document.createElement('option');
+            opt.value = year;
+            opt.innerText = year;
+            filterYear.appendChild(opt);
+        });
+    }
+
+    // --- LISTENERS DE FILTRO ---
+    filterYear.addEventListener('change', () => {
+        // Recalcula para o que já estiver selecionado
+        if (selectedLayers.size > 0) updateInfoPanel();
+    });
+    
+    filterMonth.addEventListener('change', () => {
+        if (selectedLayers.size > 0) updateInfoPanel();
+    });
+
+    filterDay.addEventListener('change', () => {
+        if (selectedLayers.size > 0) updateInfoPanel();
+    });
+
+    // --- HELPER PARA EXTRAIR MÊS DA DATA (DD/MM/YYYY ou YYYY-MM-DD) ---
+    function getMonthFromDate(dateStr) {
+        if (!dateStr) return null;
+        dateStr = String(dateStr).trim();
+        
+        // Tenta DD/MM/YYYY
+        if (dateStr.includes('/')) {
+            const parts = dateStr.split('/');
+            if (parts.length >= 2) return parseInt(parts[1], 10);
+        }
+        // Tenta YYYY-MM-DD
+        if (dateStr.includes('-')) {
+            const parts = dateStr.split('-');
+            if (parts.length >= 2) return parseInt(parts[1], 10);
+        }
+        return null;
+    }
+
+    // --- HELPER PARA EXTRAIR DIA DA DATA (DD/MM/YYYY ou YYYY-MM-DD) ---
+    function getDayFromDate(dateStr) {
+        if (!dateStr) return null;
+        dateStr = String(dateStr).trim();
+        
+        // Tenta DD/MM/YYYY (Padrão BR, dia é o primeiro)
+        if (dateStr.includes('/')) {
+            const parts = dateStr.split('/');
+            if (parts.length >= 1) return parseInt(parts[0], 10);
+        }
+        // Tenta YYYY-MM-DD (Padrão ISO, dia é o último)
+        if (dateStr.includes('-')) {
+            const parts = dateStr.split('-');
+            if (parts.length >= 3) return parseInt(parts[2], 10);
+        }
+        return null;
+    }
+
+    // --- LÓGICA ESPACIAL (TURF.JS) COM TIPOLOGIA E FILTROS ---
+    function getCrimeStatsInFeature(featurePolygon) {
+        if (!globalCrimeData || !featurePolygon) return { total: 0, types: {} };
+        
+        const geomType = featurePolygon.geometry.type;
+        if (geomType !== 'Polygon' && geomType !== 'MultiPolygon') return { total: 0, types: {} };
+
+        // Pega valores dos filtros
+        const selYear = filterYear.value; // "all" ou numero
+        const selMonth = filterMonth.value; // "all" ou numero (1-12)
+        const selDay = filterDay.value; // "all" ou numero (1-31)
+
+        try {
+            // 1. Filtra primeiro os pontos que atendem ao critério de tempo (otimização)
+            // Ou filtra depois do Turf? Filtrar antes economiza processamento do Turf.
+            // Mas Turf precisa de FeatureCollection.
+            // Vamos iterar sobre o resultado do Turf (pontos dentro) e aplicar filtro de tempo.
+            
+            const ptsWithin = turf.pointsWithinPolygon(globalCrimeData, featurePolygon);
+            
+            let filteredFeatures = ptsWithin.features;
+
+            // Filtro de Ano
+            if (selYear !== 'all') {
+                filteredFeatures = filteredFeatures.filter(f => String(f.properties.ano_oco) === selYear);
+            }
+
+            // Filtro de Mês
+            if (selMonth !== 'all') {
+                const targetMonth = parseInt(selMonth, 10);
+                filteredFeatures = filteredFeatures.filter(f => {
+                    const m = getMonthFromDate(f.properties.data_oco);
+                    return m === targetMonth;
+                });
+            }
+
+            // Filtro de Dia (NOVO)
+            if (selDay !== 'all') {
+                const targetDay = parseInt(selDay, 10);
+                filteredFeatures = filteredFeatures.filter(f => {
+                    const d = getDayFromDate(f.properties.data_oco);
+                    return d === targetDay;
+                });
+            }
+
+            const total = filteredFeatures.length;
+            const types = {};
+
+            // Itera sobre os pontos FILTRADOS
+            filteredFeatures.forEach(f => {
+                const natRaw = f.properties['natureza'] || f.properties['NATUREZA'] || 'Não informado';
+                const nat = natRaw.toUpperCase().trim();
+                types[nat] = (types[nat] || 0) + 1;
+            });
+
+            return { total, types };
+        } catch (err) {
+            console.error("Erro cálculo espacial:", err);
+            return { total: 0, types: {} };
+        }
+    }
+
+    // Helper para traduzir valores
+    function getTranslatedValue(key, value){
+      if(key === 'CD_SIT' && situationMap[value]) return `${value} - ${situationMap[value]}`;
+      if(key === 'CD_TIPO' && typeMap[value]) return `${value} - ${typeMap[value]}`;
+      return value;
+    }
+
+    // Identificador robusto
+    function getIdentifier(props){
+      const keys = [
+        'NM_AGLOM', 'NM_FCU', 'NM_NU', 'NM_BAIRRO', 'NM_DIST', 'NM_SUBDIST', 'Nome', 
+        'NM_MUN', 'NM_CONCURB', 'NM_RGI', 'NM_RGINT', 'NM_UF', 
+        'Aisp', 'Risp', 'Area de desenvolvimento', 'NM_TIPO', 'NM_SIT', 'SITUACAO', 'CD_SETOR'
+      ];
+      for (const k of keys){ if (props && props[k] != null && String(props[k]).trim() !== '') return String(props[k]); }
+      const codeKeys = ['CD_MUN','CD_BAIRRO','CD_SIT','CD_TIPO','Cod_Risp','CD_FCU'];
+      for (const k of codeKeys){ if (props && props[k] != null) return getTranslatedValue(k, String(props[k])); }
+      return 'Item';
+    }
+
+    const selectedStyle = { weight:4, color:'#FFD700', dashArray:'', fillOpacity:.7 };
+
+    function onFeatureClick(layer){
+      return (e)=>{
+        const multi = e.originalEvent ? (e.originalEvent.ctrlKey || e.originalEvent.metaKey) : (e.ctrlKey || e.metaKey);
+        if (!multi){ selectedLayers.forEach(l=>{ if(l!==layer){ if(l.setStyle) l.setStyle(l.defaultStyle); }}); selectedLayers.clear(); }
+        if (selectedLayers.has(layer)){ if(layer.setStyle) layer.setStyle(layer.defaultStyle); selectedLayers.delete(layer); }
+        else { if(layer.setStyle) layer.setStyle(selectedStyle); selectedLayers.add(layer); }
+        updateInfoPanel(); updateSelectedFeaturesList(); if (e.originalEvent) L.DomEvent.stopPropagation(e);
+      };
+    }
+
+    function onEachFeatureFactory(source){
+      return (feature, layer)=>{
+        layer.customSourceName = source.name;
+        layer.defaultStyle = (typeof source.style === 'function') ? source.style(feature) : source.style;
+        const props = feature?.properties || {};
+        const rawValue = props[source.popupProperty];
+        const displayValue = getTranslatedValue(source.popupProperty, rawValue);
+        const title = displayValue != null && String(displayValue).trim() !== '' ? String(displayValue) : getIdentifier(props);
+        const fieldLabel = propertyNames[source.popupProperty] || source.popupProperty || 'Identificador';
+        
+        layer.bindPopup(`
+          <div class="font-sans">
+            <strong class="text-indigo-700 block mb-1">${escapeHtml(source.name)}</strong>
+            <div class="text-xs text-gray-500 uppercase">${escapeHtml(fieldLabel)}</div>
+            <div class="text-sm font-medium">${escapeHtml(title)}</div>
+          </div>
+        `);
+        layer.on('click', onFeatureClick(layer));
+      };
+    }
+
+    async function ensureLayerLoaded(source){
+      if (loadedLayers[source.name]) return loadedLayers[source.name];
+      statusEl.textContent = `Carregando: ${source.name}...`;
+      const resp = await fetch(source.url);
+      if (!resp.ok) throw new Error(`Falha ao buscar ${source.name}: ${resp.status} ${resp.statusText}`);
+      const data = await resp.json();
+      const layer = L.geoJSON(data, { style: source.style, onEachFeature: onEachFeatureFactory(source) });
+      layer.customSourceName = source.name;
+      loadedLayers[source.name] = layer;
+      statusEl.textContent = `Carregado: ${source.name}`;
+      return layer;
+    }
+
+    function clearSelectionForLayer(group){
+      for (const l of Array.from(selectedLayers)){
+        if (group.hasLayer && group.hasLayer(l)) { if(l.setStyle) l.setStyle(l.defaultStyle); selectedLayers.delete(l); }
+      }
+      updateInfoPanel(); updateSelectedFeaturesList();
+    }
+    
+    // ---------- Utils Geo ----------
+    function getFeatureCenter(layer) {
+      if (layer.getBounds) {
+        return layer.getBounds().getCenter();
+      } else if (layer.getLatLng) {
+        return layer.getLatLng();
+      }
+      return null;
+    }
+    
+    function copyToClipboard(text) {
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+
+    map.on('click', ()=>{
+      selectedLayers.forEach(l=>{ if(l.setStyle) l.setStyle(l.defaultStyle); });
+      selectedLayers.clear(); updateInfoPanel(); updateSelectedFeaturesList(); searchResultsContainer.classList.add('hidden');
+    });
+
+    // ---------- Export ----------
+    function downloadFile(filename, content, mimeType){
+      const blob = new Blob([content], { type: mimeType });
+      const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+      link.href = url; link.download = filename; document.body.appendChild(link); link.click();
+      document.body.removeChild(link); URL.revokeObjectURL(url);
+    }
+
+    function exportSelectionToCSV(filename, layers){
+      const results = layers || Array.from(selectedLayers);
+      if (results.length === 0){ alert('Não há dados selecionados para exportar.'); return; }
+      const allKeys = new Set();
+      results.forEach(layer=>{ Object.keys(layer.feature.properties).forEach(k=>{ const low=k.toLowerCase(); if(low!=='fid'&&low!=='id') allKeys.add(k); }); });
+      const keys = Array.from(allKeys).sort();
+      const headers = keys.map(k=>`"${(propertyNames[k]||k).replace(/"/g,'""')}"`);
+      let csv = headers.join(',')+'\r\n';
+      results.forEach(layer=>{
+        const row = keys.map(k=>{ 
+          let v = layer.feature.properties[k]; 
+          if(k === 'CD_SIT' || k === 'CD_TIPO') v = getTranslatedValue(k, v);
+          const s = (v!=null)? String(v):''; return `"${s.replace(/"/g,'""')}"`; 
+        });
+        csv += row.join(',')+'\r\n';
+      });
+      downloadFile(filename, csv, 'text/csv;charset=utf-8');
+    }
+
+    const coordsToStr = (coords)=> coords.map(c=>`${c[0]},${c[1]},0`).join(' ');
+    function polygonToKml(coords){
+      let kml = `        <Polygon>\n          <outerBoundaryIs>\n            <LinearRing>\n              <coordinates>${coordsToStr(coords[0])}</coordinates>\n            </LinearRing>\n          </outerBoundaryIs>\n`;
+      for (let i=1;i<coords.length;i++){
+        kml += `          <innerBoundaryIs>\n            <LinearRing>\n              <coordinates>${coordsToStr(coords[i])}</coordinates>\n            </LinearRing>\n          </innerBoundaryIs>\n`;
+      }
+      kml += `        </Polygon>\n`; return kml;
+    }
+    function featureToKMLPlacemark(feature){
+      const props = feature.properties || {}; const geom = feature.geometry || {}; const name = getIdentifier(props);
+      let xml = `    <Placemark>\n      <name>${escapeXml(String(name))}</name>\n      <ExtendedData>\n`;
+      for (const key in props){
+        const low=key.toLowerCase(); if(low==='fid'||low==='id') continue;
+        let v = props[key]; 
+        if(key === 'CD_SIT' || key === 'CD_TIPO') v = getTranslatedValue(key, v);
+        const display = propertyNames[key]||key;
+        xml += `        <Data name="${escapeXml(String(display))}"><value>${escapeXml(String(v))}</value></Data>\n`;
+      }
+      xml += '      </ExtendedData>\n';
+      if (geom.type==='Polygon'){ xml += polygonToKml(geom.coordinates); }
+      else if (geom.type==='MultiPolygon'){ xml += '      <MultiGeometry>\n'; geom.coordinates.forEach(p=>{ xml += polygonToKml(p); }); xml += '      </MultiGeometry>\n'; }
+      else if (geom.type==='LineString'){ xml += `      <LineString>\n        <coordinates>${geom.coordinates.map(c=>`${c[0]},${c[1]},0`).join(' ')}</coordinates>\n      </LineString>\n`; }
+      else if (geom.type==='MultiLineString'){ xml += '      <MultiGeometry>\n'; geom.coordinates.forEach(line=>{ xml += `        <LineString>\n          <coordinates>${line.map(c=>`${c[0]},${c[1]},0`).join(' ')}</coordinates>\n        </LineString>\n`; }); xml += '      </MultiGeometry>\n'; }
+      else if (geom.type==='Point'){ xml += `      <Point>\n        <coordinates>${geom.coordinates[0]},${geom.coordinates[1]},0</coordinates>\n      </Point>\n`; }
+      else if (geom.type==='MultiPoint'){ xml += '      <MultiGeometry>\n'; geom.coordinates.forEach(pt=>{ xml += `        <Point>\n          <coordinates>${pt[0]},${pt[1]},0</coordinates>\n        </Point>\n`; }); xml += '      </MultiGeometry>\n'; }
+      xml += '    </Placemark>'; return xml;
+    }
+    function exportSelectionToKML(filename, layers){
+      const results = layers || Array.from(selectedLayers);
+      if (results.length === 0){ alert('Nenhum elemento selecionado para exportar.'); return; }
+      let placemarks=''; results.forEach(layer=> placemarks += featureToKMLPlacemark(layer.feature) + '\n');
+      const fullKML = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n${placemarks}  </Document>\n</kml>`;
+      downloadFile(filename, fullKML, 'application/vnd.google-earth.kml+xml');
+    }
+
+    // --- NOVA FUNÇÃO: Atualiza a Lista de Crimes (HTML puro) ---
+    function updateCrimeList(crimeTypesObj) {
+        const listEl = document.getElementById('crime-top-list');
+        listEl.innerHTML = ''; // Limpa
+
+        // Ordena por quantidade (decrescente) - MOSTRA TODOS AGORA (removido o .slice)
+        const sortedCrimes = Object.entries(crimeTypesObj)
+            .sort((a, b) => b[1] - a[1]);
+
+        if (sortedCrimes.length === 0) {
+            listEl.innerHTML = '<li class="text-slate-400 italic">Nenhum crime registrado com os filtros atuais.</li>';
+            return;
+        }
+
+        sortedCrimes.forEach(([type, count]) => {
+            const li = document.createElement('li');
+            li.className = 'flex justify-between items-center border-b border-dotted border-slate-200 pb-1';
+            // Formata nome: Primeira maiúscula, resto minúscula (opcional)
+            const typeFormatted = type.length > 20 ? type.substring(0,20)+'...' : type;
+            
+            li.innerHTML = `
+                <span class="font-medium text-slate-600 truncate" title="${type}">${type}</span>
+                <span class="font-bold text-red-600">${count.toLocaleString('pt-BR')}</span>
+            `;
+            listEl.appendChild(li);
+        });
+    }
+
+    // ---------- Painel de informações & Dashboard Trigger ----------
+    function updateInfoPanel(){
+      const count = selectedLayers.size; 
+      tableBody.innerHTML=''; 
+      individualDetailsContainer.innerHTML=''; 
+      individualDetailsContainer.classList.add('hidden');
+      
+      // Lógica de Exibição do Dashboard
+      if (count === 0) {
+          dashboardContainer.classList.add('hidden'); // Esconde se nada selecionado
+          tableContainer.classList.add('hidden');
+          return;
+      }
+      
+      // Mostra os containers
+      dashboardContainer.classList.remove('hidden');
+      tableContainer.classList.remove('hidden');
+
+      let totalCrimes = 0;
+      let aggregatedCrimeTypes = {}; // Acumulador de tipos de crime
+
+      if (count===1){
+        const layer = Array.from(selectedLayers)[0]; 
+        const props = layer.feature.properties; 
+        const identifier = getIdentifier(props);
+        let printed=0;
+
+        // --- ATUALIZAÇÃO DO DASHBOARD ---
+        const pop = parseFloat(props['V0001'] || props['Total de pessoas'] || 0);
+        const domPart = parseFloat(props['V0003'] || props['Total de Domicílios Particulares'] || 0);
+        const domOcup = parseFloat(props['V0007'] || props['Total de Domicílios Particulares Ocupados'] || 0);
+        const domCol = parseFloat(props['V0004'] || props['Total de Domicílios Coletivos'] || 0);
+        const domTotal = parseFloat(props['V0002'] || props['Total de Domicílios (Particulares + Coletivos)'] || domPart + domCol || 0);
+
+        const domVagos = domPart - domOcup;
+        const taxaVac = domPart > 0 ? ((domVagos / domPart) * 100).toFixed(1) : "0.0";
+        const densidade = domOcup > 0 ? (pop / domOcup).toFixed(2) : "0.00";
+
+        // Cálculo de Crimes (Turf.js) com TIPOLOGIA e FILTROS
+        const stats = getCrimeStatsInFeature(layer.feature);
+        totalCrimes = stats.total;
+        aggregatedCrimeTypes = stats.types;
+
+        // Preenchendo HTML do Dashboard
+        document.getElementById('dash-local-name').innerText = identifier;
+        document.getElementById('dash-pop').innerText = pop.toLocaleString('pt-BR');
+        document.getElementById('dash-dens').innerText = densidade + " mor./dom";
+        
+        document.getElementById('dash-dom-total').innerText = domTotal.toLocaleString('pt-BR');
+        
+        document.getElementById('dash-vagos').innerText = domVagos.toLocaleString('pt-BR');
+        document.getElementById('dash-taxa-vac').innerText = "Taxa: " + taxaVac + "%";
+        
+        document.getElementById('dash-coletivos').innerText = domCol.toLocaleString('pt-BR');
+
+        // Atualiza Card de Crimes
+        const elCrimes = document.getElementById('dash-crimes');
+        if(elCrimes) {
+            elCrimes.innerText = globalCrimeData ? totalCrimes.toLocaleString('pt-BR') : 'Carregando...';
+            if(globalCrimeData && pop > 0) {
+                 const taxaCrime = ((totalCrimes / pop) * 100000).toFixed(1);
+                 document.getElementById('dash-crimes-info').innerText = `Taxa: ${taxaCrime} / 100k hab.`;
+            } else {
+                 document.getElementById('dash-crimes-info').innerText = "Na área selecionada";
+            }
+        }
+
+        // Atualiza Lista de Crimes
+        updateCrimeList(aggregatedCrimeTypes);
+
+        // Display Coordinates (Table)
+        const center = getFeatureCenter(layer);
+        if(center) {
+            const lat = center.lat.toFixed(6);
+            const lng = center.lng.toFixed(6);
+            const fullCoords = `${lat}, ${lng}`;
+            
+            const trCoords = document.createElement('tr'); 
+            trCoords.className='hover:bg-gray-50 border-b-2 border-gray-100';
+            trCoords.innerHTML = `
+                <td class="px-6 py-2 whitespace-nowrap text-sm font-bold text-indigo-700">Coordenadas (Centro)</td>
+                <td class="px-6 py-2 whitespace-nowrap text-sm text-slate-700 flex items-center gap-2">
+                   <span>${fullCoords}</span>
+                   <div class="flex gap-1">
+                     <button onclick="copyToClipboard('${lat}')" class="px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-xs rounded text-gray-700" title="Copiar Latitude">Lat</button>
+                     <button onclick="copyToClipboard('${lng}')" class="px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-xs rounded text-gray-700" title="Copiar Longitude">Long</button>
+                     <button onclick="copyToClipboard('${fullCoords}')" class="px-2 py-0.5 bg-indigo-100 hover:bg-indigo-200 text-xs rounded text-indigo-700 font-semibold" title="Copiar Tudo">Copiar Tudo</button>
+                   </div>
+                </td>`;
+            tableBody.appendChild(trCoords);
+        }
+
+        // 2. Properties Loop
+        for (const key of Object.keys(props)){
+          const low = key.toLowerCase(); 
+          if (low==='fid'||low==='id') continue;
+          
+          const isCode = key.toUpperCase().startsWith('CD_') || key.toUpperCase().startsWith('COD_');
+          const isTranslated = (key === 'CD_SIT' || key === 'CD_TIPO'); 
+          if (isCode && !isTranslated) continue; 
+
+          let val = props[key];
+          if (val == null || String(val).trim() === '') continue;
+
+          val = getTranslatedValue(key, val); 
+          const disp=propertyNames[key]||key;
+          
+          if (key === 'NM_MUN') {
+               const tr = document.createElement('tr');
+               tr.className = 'border-t bg-gray-50 border-gray-200';
+               tr.innerHTML = `<td class="px-6 py-2 whitespace-nowrap text-sm font-bold text-slate-900">${escapeHtml(disp)}</td><td class="px-6 py-2 whitespace-nowrap text-sm font-bold text-slate-900">${escapeHtml(val)}</td>`;
+               tableBody.appendChild(tr);
+          } else {
+               const tr = document.createElement('tr');
+               tr.className = 'hover:bg-gray-50';
+               tr.innerHTML = `<td class="px-6 py-2 whitespace-nowrap text-sm font-medium text-slate-900">${escapeHtml(disp)}</td><td class="px-6 py-2 whitespace-nowrap text-sm text-slate-700">${escapeHtml(val)}</td>`;
+               tableBody.appendChild(tr);
+          }
+          printed++;
+        }
+
+        const trVagos = document.createElement('tr'); 
+        trVagos.className='hover:bg-gray-50'; 
+        trVagos.innerHTML = `<td class="px-6 py-2 whitespace-nowrap text-sm font-medium text-slate-900">Total de Domicílios Vagos</td><td class="px-6 py-2 whitespace-nowrap text-sm text-slate-700">${domVagos.toLocaleString('pt-BR')}</td>`;
+        tableBody.appendChild(trVagos);
+
+        const trTaxa = document.createElement('tr'); 
+        trTaxa.className='hover:bg-gray-50'; 
+        trTaxa.innerHTML = `<td class="px-6 py-2 whitespace-nowrap text-sm font-medium text-slate-900">Taxa de Vacância</td><td class="px-6 py-2 whitespace-nowrap text-sm text-slate-700">${taxaVac}%</td>`;
+        tableBody.appendChild(trTaxa);
+
+        const trDens = document.createElement('tr'); 
+        trDens.className='hover:bg-gray-50 border-t-2 border-gray-100'; 
+        trDens.innerHTML = `<td class="px-6 py-2 whitespace-nowrap text-sm font-medium text-slate-900">Média de Moradores por Domicílio (Densidade)</td><td class="px-6 py-2 whitespace-nowrap text-sm text-slate-700">${densidade}</td>`;
+        tableBody.appendChild(trDens);
+        
+        // Adiciona Crime na Tabela também
+        const trCrime = document.createElement('tr'); 
+        trCrime.className='hover:bg-red-50 border-t-2 border-red-100'; 
+        trCrime.innerHTML = `<td class="px-6 py-2 whitespace-nowrap text-sm font-bold text-red-900">Ocorrências de Crime</td><td class="px-6 py-2 whitespace-nowrap text-sm font-bold text-red-700">${totalCrimes.toLocaleString('pt-BR')}</td>`;
+        tableBody.appendChild(trCrime);
+
+        if (!printed && !center){ const tr = document.createElement('tr'); tr.innerHTML = `<td colspan="2" class="px-6 py-3 text-center text-gray-500">Sem propriedades.</td>`; tableBody.appendChild(tr); }
+      
+      } else {
+        // --- MULTIPLE SELECTION (SOMA DE FEIÇÕES) ---
+        
+        let sumPop = 0;
+        let sumDomPart = 0;
+        let sumDomOcup = 0;
+        let sumDomCol = 0;
+        let sumDomTotal = 0;
+        let sumCrimes = 0;
+        let combinedTypes = {};
+
+        // Itera sobre todas as camadas selecionadas para somar
+        selectedLayers.forEach(layer => {
+            const props = layer.feature.properties;
+            const getVal = (keys) => {
+                for(let k of keys) {
+                    if(props[k] !== undefined && props[k] !== null) {
+                        let v = props[k];
+                        if (typeof v === 'string') v = parseFloat(v.replace(',', '.'));
+                        return Number(v) || 0;
+                    }
+                }
+                return 0;
+            };
+
+            sumPop += getVal(['V0001', 'Total de pessoas']);
+            sumDomPart += getVal(['V0003', 'Total de Domicílios Particulares']);
+            sumDomOcup += getVal(['V0007', 'Total de Domicílios Particulares Ocupados']);
+            sumDomCol += getVal(['V0004', 'Total de Domicílios Coletivos']);
+            
+            let totalD = getVal(['V0002', 'Total de Domicílios (Particulares + Coletivos)']);
+            if (totalD === 0) totalD = getVal(['V0003', 'Total de Domicílios Particulares']) + getVal(['V0004', 'Total de Domicílios Coletivos']);
+            sumDomTotal += totalD;
+            
+            // Soma Crimes e Mescla Tipos (Com filtros)
+            const stats = getCrimeStatsInFeature(layer.feature);
+            sumCrimes += stats.total;
+            // Mesclar tipos
+            for (const [type, qtd] of Object.entries(stats.types)) {
+                combinedTypes[type] = (combinedTypes[type] || 0) + qtd;
+            }
+        });
+
+        // Cálculos Agregados (Matemática com os Totais)
+        const sumVagos = sumDomPart - sumDomOcup;
+        const avgTaxaVac = sumDomPart > 0 ? ((sumVagos / sumDomPart) * 100).toFixed(1) : "0.0";
+        const avgDensidade = sumDomOcup > 0 ? (sumPop / sumDomOcup).toFixed(2) : "0.00";
+
+        // Atualiza Dashboard com SOMAS
+        document.getElementById('dash-local-name').innerText = `Seleção Múltipla (${count} áreas)`;
+        document.getElementById('dash-pop').innerText = sumPop.toLocaleString('pt-BR');
+        document.getElementById('dash-dens').innerText = avgDensidade + " mor./dom (média)";
+        
+        document.getElementById('dash-dom-total').innerText = sumDomTotal.toLocaleString('pt-BR');
+        
+        document.getElementById('dash-vagos').innerText = sumVagos.toLocaleString('pt-BR');
+        document.getElementById('dash-taxa-vac').innerText = "Taxa Global: " + avgTaxaVac + "%";
+        
+        document.getElementById('dash-coletivos').innerText = sumDomCol.toLocaleString('pt-BR');
+
+        // Atualiza Card de Crimes (Multipla Seleção)
+        const elCrimes = document.getElementById('dash-crimes');
+        if(elCrimes) {
+            elCrimes.innerText = globalCrimeData ? sumCrimes.toLocaleString('pt-BR') : 'Carregando...';
+            if(globalCrimeData && sumPop > 0) {
+                 const taxaCrime = ((sumCrimes / sumPop) * 100000).toFixed(1);
+                 document.getElementById('dash-crimes-info').innerText = `Taxa: ${taxaCrime} / 100k hab.`;
+            } else {
+                 document.getElementById('dash-crimes-info').innerText = "Na seleção atual";
+            }
+        }
+
+        // Atualiza Lista de Crimes
+        updateCrimeList(combinedTypes); 
+
+        // Preenche a tabela com o resumo dos dados somados
+        const trSum = document.createElement('tr');
+        trSum.innerHTML = `
+            <td class="px-6 py-2 font-bold text-indigo-800 bg-indigo-50">Total Consolidado</td>
+            <td class="px-6 py-2 font-bold text-indigo-800 bg-indigo-50">${count} feições selecionadas</td>
+        `;
+        tableBody.appendChild(trSum);
+
+        const metrics = [
+            { label: 'População Total', val: sumPop.toLocaleString('pt-BR') },
+            { label: 'Total de Domicílios', val: sumDomTotal.toLocaleString('pt-BR') },
+            { label: 'Total de Domicílios Particulares', val: sumDomPart.toLocaleString('pt-BR') },
+            { label: 'Total de Domicílios Ocupados', val: sumDomOcup.toLocaleString('pt-BR') },
+            { label: 'Total de Domicílios Coletivos', val: sumDomCol.toLocaleString('pt-BR') },
+            { label: 'Domicílios Vagos/Ocasional', val: sumVagos.toLocaleString('pt-BR') },
+            { label: 'Taxa de Vacância Média', val: avgTaxaVac + '%' },
+            { label: 'Densidade Média', val: avgDensidade },
+            { label: 'Total Ocorrências (Crimes)', val: sumCrimes.toLocaleString('pt-BR') }
+        ];
+
+        metrics.forEach(m => {
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50';
+            tr.innerHTML = `<td class="px-6 py-2 text-sm font-medium text-slate-900">${m.label}</td><td class="px-6 py-2 text-sm text-slate-700">${m.val}</td>`;
+            tableBody.appendChild(tr);
+        });
+      }
+    }
+
+    function updateSelectedFeaturesList(){
+      selectedFeaturesList.innerHTML=''; if (selectedLayers.size===0){ selectedFeaturesContainer.classList.add('hidden'); return; }
+      selectedLayers.forEach(layer=>{
+        const props = layer.feature.properties; const identifier = getIdentifier(props); const sourceName = layer.customSourceName||'Camada';
+        const html = `
+          <div class="flex justify-between items-center p-2 border-b last:border-b-0" data-layer-id="${layer._leaflet_id}">
+            <div><p class="font-semibold text-sm text-slate-900">${escapeHtml(identifier)}</p><p class="text-xs text-slate-600">${escapeHtml(sourceName)}</p></div>
+            <div class="flex items-center">
+              <button class="zoom-to-feature p-1 text-indigo-700 hover:text-indigo-900" title="Zoom na feição" aria-label="Zoom na feição">
+                <svg class="w-5 h-5 pointer-events-none" fill="currentColor" viewBox="0 0 20 20"><path d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"></path><path d="M8 4.5a.5.5 0 01.5.5v2h2a.5.5 0 010 1h-2v2a.5.5 0 01-1 0v-2h-2a.5.5 0 010-1h2v-2a.5.5 0 01.5-.5z"></path></svg>
+              </button>
+              <button class="remove-from-selection p-1 text-red-600 hover:text-red-700" title="Remover da seleção" aria-label="Remover da seleção">
+                <svg class="w-5 h-5 pointer-events-none" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
+              </button>
+            </div>
+          </div>`;
+        selectedFeaturesList.insertAdjacentHTML('beforeend', html);
+      });
+      selectedFeaturesContainer.classList.remove('hidden');
+    }
+
+    function updateActiveLayersDisplay(){
+      const active=[]; for (const n in loadedLayers) if (map.hasLayer(loadedLayers[n])) active.push(n);
+      activeLayerDisplay.innerHTML = active.length>0 ? `Camadas ativas: ${escapeHtml(active.join(', '))}` : 'Camadas ativas: nenhuma';
+    }
+
+    // ---------- Busca (otimizada) ----------
+    const normalizeString = s => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    const levenshteinDistance = (a,b)=>{
+      if(a.length===0) return b.length; if(b.length===0) return a.length;
+      const dp = new Array(b.length+1); for(let i=0;i<=b.length;i++) dp[i]=i;
+      for(let j=1;j<=a.length;j++){
+        let prev = dp[0]; dp[0]=j;
+        for(let i=1;i<=b.length;i++){
+          const temp = dp[i];
+          dp[i] = (a[j-1]===b[i-1]) ? prev : Math.min(prev+1, dp[i]+1, dp[i-1]+1);
+          prev = temp;
+        }
+      }
+      return dp[b.length];
+    };
+
+    const PRIORITY_KEYS = ['NM_MUN','NM_BAIRRO','NM_UF','NM_NU','NM_CONCURB','NM_RGINT','NM_RGI','NM_DIST','NM_SUBDIST','NM_TIPO','NM_SIT','NM_AGLOM','CD_SETOR','Nome', 'Aisp', 'Risp', 'Area de desenvolvimento', 'SITUACAO'];
+
+    let currentGroupedResults = {};
+
+    function featureMatches(term, props){
+      // 1) primeiro nos campos prioritários
+      for (const k of PRIORITY_KEYS){
+        const v = props[k]; if (v==null || v==='') continue;
+        if (normalizeString(String(v)).toLowerCase().includes(term)) return {key:k, value:v, distance:-1};
+      }
+      // 2) se não achou, varre os demais (rápido, sem fuzzy)
+      for (const key in props){
+        const low = key.toLowerCase(); if (low==='fid' || low==='id') continue;
+        if (PRIORITY_KEYS.includes(key)) continue;
+        const v = props[key]; if (v==null || v==='') continue;
+        if (normalizeString(String(v)).toLowerCase().includes(term)) return {key, value:v, distance:-1};
+      }
+      return null;
+    }
+
+    async function searchInLayer(layer, term, maxResults=5000){
+      const found = [];
+      layer.eachLayer(poly=>{
+        if (found.length >= maxResults) return;
+        if (!poly.feature || !poly.feature.properties) return;
+        const props = poly.feature.properties;
+        const hit = featureMatches(term, props);
+        if (hit){
+          found.push({ polygonLayer: poly, value: hit.value, key: hit.key, distance: hit.distance });
+        }
+      });
+      return found;
+    }
+
+    async function performSearch(){
+      const raw = searchInput.value.trim();
+      const term = normalizeString(raw).toLowerCase();
+      if(!term){ searchResultsContainer.classList.add('hidden'); return; }
+
+      // UI
+      searchResultsList.innerHTML=''; searchResultsContainer.classList.remove('hidden');
+      searchButton.disabled=true; searchIcon.classList.add('hidden'); searchSpinner.classList.remove('hidden');
+      let totalFound = 0; currentGroupedResults = {}; searchResultsTitle.textContent = 'Buscando...';
+
+      try{
+        const onlyActive = searchActiveLayersToggle.checked;
+        const layersToSearch = [];
+
+        if (onlyActive){
+          for (const name in loadedLayers){ if (map.hasLayer(loadedLayers[name])) layersToSearch.push({name, loader: async()=>loadedLayers[name]}); }
+        } else {
+          dataSources.forEach(src=>{
+            layersToSearch.push({
+              name: src.name,
+              loader: async()=> await ensureLayerLoaded(src)
+            });
+          });
+        }
+
+        const MAX_RESULTS = 5000;
+        
+        const addToResults = (layerName, newItems) => {
+            if(!currentGroupedResults[layerName]) currentGroupedResults[layerName] = [];
+            const existing = new Set(currentGroupedResults[layerName].map(i => String(i.value)));
+            const unique = newItems.filter(i => !existing.has(String(i.value)));
+            currentGroupedResults[layerName].push(...unique);
+            return unique.length;
+        };
+
+        for (let i=0;i<layersToSearch.length;i++){
+          const step = layersToSearch[i];
+          statusEl.textContent = `Buscando em: ${step.name} (${i+1}/${layersToSearch.length})...`;
+          const l = await step.loader();
+          const results = await searchInLayer(l, term, MAX_RESULTS);
+          
+          if (results.length){
+            const addedCount = addToResults(step.name, results);
+            totalFound += addedCount;
+          }
+          
+          if (!onlyActive) await sleep(10);
+        }
+
+        if (totalFound===0 && term.length>=4){
+          statusEl.textContent = 'Tentando correspondência aproximada...';
+          const FUZZY_LIMIT = 120; let fuzzyCount=0;
+          for (let i=0;i<layersToSearch.length;i++){
+            if (fuzzyCount >= FUZZY_LIMIT) break;
+            const step = layersToSearch[i];
+            const l = await step.loader();
+            l.eachLayer(poly=>{
+              if (fuzzyCount >= FUZZY_LIMIT) return;
+              if (!poly.feature || !poly.feature.properties) return;
+              const props = poly.feature.properties;
+              for (const k of PRIORITY_KEYS){
+                const v = props[k]; if (v==null || v==='') continue;
+                const n = normalizeString(String(v)).toLowerCase();
+                const d = levenshteinDistance(term, n);
+                if (d<=2 || (term.length>=6 && d<=3)){
+                  const valStr = String(v);
+                  const groupArr = currentGroupedResults[step.name] || [];
+                  const exists = groupArr.some(r => String(r.value) === valStr);
+                  
+                  if (!exists) {
+                      (currentGroupedResults[step.name] ||= []).push({ polygonLayer: poly, value: v, key: k, distance:d });
+                      fuzzyCount++;
+                  }
+                  break;
+                }
+              }
+            });
+          }
+          totalFound = 0;
+          for(const key in currentGroupedResults) totalFound += currentGroupedResults[key].length;
+        }
+
+        for (const g in currentGroupedResults){
+          currentGroupedResults[g].sort((a,b)=> a.distance - b.distance);
+        }
+
+        renderSearchResults(currentGroupedResults, totalFound);
+        statusEl.textContent = totalFound>0 ? `Pronto: ${totalFound} resultado(s).` : 'Nenhum resultado.';
+      }catch(e){
+        console.error(e);
+        searchResultsTitle.textContent='Erro na pesquisa';
+        searchResultsList.innerHTML='<p class="p-3 text-red-600">Não foi possível concluir a busca.</p>';
+        statusEl.textContent='Erro na busca.';
+      } finally {
+        searchButton.disabled=false; searchIcon.classList.remove('hidden'); searchSpinner.classList.add('hidden');
+      }
+    }
+
+    function renderSearchResults(grouped, total){
+      searchResultsList.innerHTML='';
+      if (total>0){
+        searchResultsTitle.textContent = `${total} resultado(s)`;
+        const groups = Object.keys(grouped).sort();
+        groups.forEach(groupName=>{
+          const results = grouped[groupName];
+          const wrap = document.createElement('div'); wrap.className='border rounded-md overflow-hidden mb-2';
+          const header = document.createElement('div'); header.className='p-2 flex justify-between items-center bg-gray-50 text-slate-800 cursor-pointer hover:bg-gray-100';
+          header.innerHTML = `
+            <div class="flex items-center gap-2">
+              <span class="text-sm">${escapeHtml(groupName)}</span>
+              <span class="text-xs text-slate-500">(${results.length})</span>
+            </div>
+            <svg class="w-4 h-4 transition-transform transform" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>`;
+          const content = document.createElement('div'); content.className='hidden';
+          results.forEach(({ polygonLayer, value, key }, index)=>{
+            const uid = `${groupName}-${index}`;
+            const item = document.createElement('div'); item.className='p-2 pl-6 hover:bg-blue-50 cursor-pointer border-t text-sm'; item.dataset.resultId=uid;
+            
+            const featureProps = polygonLayer.feature.properties;
+            const identifier = getIdentifier(featureProps);
+
+            let displayVal = value;
+            if(key==='CD_SIT' || key==='CD_TIPO') displayVal = getTranslatedValue(key, value);
+            const fieldName = propertyNames[key]||key;
+
+            let htmlContent = `<p class="font-medium text-slate-900">${escapeHtml(identifier)}</p>`;
+            
+            if(String(displayVal).toLowerCase() !== String(identifier).toLowerCase()){
+                 htmlContent += `<p class="text-xs text-slate-500">Encontrado em <strong>${escapeHtml(fieldName)}</strong>: ${escapeHtml(String(displayVal))}</p>`;
+            } else {
+                 htmlContent += `<p class="text-xs text-slate-500">Campo: ${escapeHtml(fieldName)}</p>`;
+            }
+            
+            item.innerHTML = htmlContent;
+            content.appendChild(item);
+          });
+          header.addEventListener('click',()=>{ content.classList.toggle('hidden'); header.querySelector('svg').classList.toggle('rotate-180'); });
+          wrap.appendChild(header); wrap.appendChild(content); searchResultsList.appendChild(wrap);
+        });
+      } else {
+        searchResultsTitle.textContent = 'Nenhum resultado';
+        searchResultsList.innerHTML = '<p class="p-3 text-gray-500 text-sm">Tente outro termo ou ative mais camadas.</p>';
+      }
+    }
+
+    searchButton.addEventListener('click', performSearch);
+    searchInput.addEventListener('keyup', (e)=>{ if (e.key==='Enter') performSearch(); });
+    searchInput.addEventListener('input', debounce(performSearch, 350));
+
+    searchResultsList.addEventListener('click', (event)=>{
+      const targetItem = event.target.closest('[data-result-id]');
+      if (targetItem){
+        const parts = targetItem.dataset.resultId.split('-'); const index = parts.pop(); const groupName = parts.join('-');
+        const result = currentGroupedResults[groupName]?.[index];
+        if (result && result.polygonLayer){
+          const layer = result.polygonLayer; const toActivate = layer.customSourceName;
+          for (const name in loadedLayers){ if (map.hasLayer(loadedLayers[name])){ map.removeLayer(loadedLayers[name]); const cb = document.querySelector(`[data-layer-name="${name}"]`); if (cb) cb.checked=false; } }
+          if (loadedLayers[toActivate]){ map.addLayer(loadedLayers[toActivate]); const cb = document.querySelector(`[data-layer-name="${toActivate}"]`); if (cb) cb.checked=true; }
+          if (layer.getBounds && layer.getBounds().isValid()) map.fitBounds(layer.getBounds().pad(0.1));
+          layer.fire('click', { originalEvent: { ctrlKey:false, metaKey:false }});
+        }
+      }
+    });
+
+    abandonSearchButton.addEventListener('click', ()=>{
+      searchResultsContainer.classList.add('hidden'); searchInput.value='';
+      selectedLayers.forEach(l=>{ if(l.setStyle) l.setStyle(l.defaultStyle); });
+      selectedLayers.clear(); updateInfoPanel(); updateSelectedFeaturesList();
+    });
+
+    // ---------- Legendas ----------
+    const legendSectors = L.control({position:'bottomright'}); legendSectors.onAdd = function(){ const d=L.DomUtil.create('div','info legend'); const g=[0,100,250,500,750,1000,1500,2000]; d.innerHTML+='<div class="text-center text-xs font-semibold mb-1">População (Setores)</div>'; for(let i=0;i<g.length;i++){ d.innerHTML += '<i style="background:'+getSectorsPopulationColor(g[i]+1)+'"></i> '+ g[i].toLocaleString('pt-BR') + (g[i+1] ? '&ndash;'+g[i+1].toLocaleString('pt-BR')+'<br>' : '+'); } return d; }; legendSectors.addTo(map);
+    const legendAreaDev = L.control({position:'bottomright'}); legendAreaDev.onAdd = function(){ const d=L.DomUtil.create('div','info legend'); const g=[0,88281,112096,127442,170528,218862,389168]; d.innerHTML+='<div class="text-center text-xs font-semibold mb-1">População (Áreas Dev.)</div>'; for(let i=0;i<g.length;i++){ d.innerHTML += '<i style="background:'+getAreaDevColor(g[i]+1)+'"></i> '+ g[i].toLocaleString('pt-BR') + (g[i+1] ? '&ndash;'+g[i+1].toLocaleString('pt-BR')+'<br>' : '+'); } return d; }; legendAreaDev.addTo(map);
+    const legendGeneral = L.control({position:'bottomright'}); legendGeneral.onAdd = function(){ const d=L.DomUtil.create('div','info legend'); const g=[0,1000,5000,10000,20000,50000,100000,200000]; d.innerHTML+='<div class="text-center text-xs font-semibold mb-1">População (Geral)</div>'; for(let i=0;i<g.length;i++){ d.innerHTML += '<i style="background:'+getGeneralPopulationColor(g[i]+1)+'"></i> '+ g[i].toLocaleString('pt-BR') + (g[i+1] ? '&ndash;'+g[i+1].toLocaleString('pt-BR')+'<br>' : '+'); } return d; }; legendGeneral.addTo(map);
+    const legendSectorsContainer = legendSectors.getContainer(); const legendAreaDevContainer = legendAreaDev.getContainer(); const legendGeneralContainer = legendGeneral.getContainer();
+    legendSectorsContainer.style.display='none'; legendAreaDevContainer.style.display='none'; legendGeneralContainer.style.display='none';
+    function updateLegendVisibility(){
+      const active = new Set(Object.keys(loadedLayers).filter(n=> map.hasLayer(loadedLayers[n])));
+      const sector = ['Situação detalhada - Nivel Bairros','Tipo do Setor - Nivel Bairros','Bairros','Núcleos Urbanos','Favelas e Comunidades','Comunidades Rurais de Teresina'];
+      legendSectorsContainer.style.display = sector.some(n=>active.has(n))? 'block':'none';
+      legendAreaDevContainer.style.display = active.has('Áreas de Desenvolvimento')? 'block':'none';
+      const hasGeneral = Array.from(active).some(n=> !sector.includes(n) && n!=='Áreas de Desenvolvimento');
+      legendGeneralContainer.style.display = hasGeneral? 'block':'none';
+    }
+
+    // ---------- Painel de camadas ----------
+    function buildLayerControl(){
+      toggleLayersBtn.addEventListener('click', ()=>{ layersPanel.classList.remove('hidden'); toggleLayersBtn.setAttribute('aria-expanded','true'); });
+      document.addEventListener('click', (ev)=>{ if(!layersPanel.contains(ev.target) && ev.target!==toggleLayersBtn){ layersPanel.classList.add('hidden'); toggleLayersBtn.setAttribute('aria-expanded','false'); }});
+      L.DomEvent.on(layersPanel, 'wheel', L.DomEvent.stopPropagation);
+      L.DomEvent.on(layersPanel, 'mousedown', L.DomEvent.stopPropagation);
+
+      dataSources.forEach(source=>{
+        const row = document.createElement('details'); row.className='group'; row.open=false;
+        const summary = document.createElement('summary'); summary.className='flex items-center justify-between gap-2 py-1 cursor-pointer';
+        const left = document.createElement('div'); left.className='flex items-center gap-2';
+        const checkbox = document.createElement('input'); checkbox.type='checkbox'; checkbox.id=`layer-checkbox-${source.name.replace(/\s/g,'-')}`; checkbox.className='h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500'; checkbox.dataset.layerName=source.name;
+        const label = document.createElement('label'); label.htmlFor=checkbox.id; label.textContent=source.name; label.className='ml-1 block text-sm text-gray-900';
+        left.appendChild(checkbox); left.appendChild(label); summary.appendChild(left);
+        const right = document.createElement('div'); right.className='flex items-center gap-2';
+        const zoomBtn = document.createElement('button'); zoomBtn.className='px-2 py-0.5 bg-slate-100 rounded text-xs'; zoomBtn.textContent='Zoom';
+        right.appendChild(zoomBtn); summary.appendChild(right);
+        const inner = document.createElement('div'); inner.className='pl-6 pb-2 flex items-center gap-2';
+        const opLabel = document.createElement('span'); opLabel.className='text-xs text-slate-600'; opLabel.textContent='Opacidade';
+        const slider = document.createElement('input'); slider.type='range'; slider.min='0'; slider.max='1'; slider.step='0.1'; slider.value='0.7'; slider.className='w-24';
+        inner.appendChild(opLabel); inner.appendChild(slider);
+        row.appendChild(summary); row.appendChild(inner); layersList.appendChild(row);
+
+        zoomBtn.addEventListener('click', async()=>{ try{ const l = await ensureLayerLoaded(source); if(!map.hasLayer(l)) map.addLayer(l); const b=l.getBounds?.(); if(b && b.isValid()) map.fitBounds(b.pad(0.05)); }catch{ alert('Não foi possível obter a extensão da camada.'); }});
+        checkbox.addEventListener('change', async()=>{
+          try{ const l = await ensureLayerLoaded(source); if (checkbox.checked){ map.addLayer(l); } else { map.removeLayer(l); clearSelectionForLayer(l);} }
+          catch(err){ console.error(err); statusEl.textContent=`Erro ao carregar ${source.name}.`; checkbox.checked=false; }
+        });
+        slider.addEventListener('input', ()=>{ const l = loadedLayers[source.name]; if(!l) return; l.eachLayer(x=>{ if(x.setStyle) x.setStyle({ fillOpacity: parseFloat(slider.value) }); }); });
+      });
+
+      btnAllOn.addEventListener('click', async()=>{ for (const s of dataSources){ try{ const l = await ensureLayerLoaded(s); if(!map.hasLayer(l)) map.addLayer(l); const cb=document.querySelector(`[data-layer-name="${s.name}"]`); if(cb) cb.checked=true; }catch{} } });
+      btnAllOff.addEventListener('click', ()=>{ for (const n in loadedLayers){ if(map.hasLayer(loadedLayers[n])) map.removeLayer(loadedLayers[n]); const cb=document.querySelector(`[data-layer-name="${n}"]`); if(cb) cb.checked=false; } selectedLayers.forEach(l=>{ if(l.setStyle) l.setStyle(l.defaultStyle); }); selectedLayers.clear(); updateInfoPanel(); updateSelectedFeaturesList(); });
+      btnExpandAll.addEventListener('click', ()=>{ layersList.querySelectorAll('details').forEach(d=> d.open=true); });
+      btnCollapseAll.addEventListener('click', ()=>{ layersList.querySelectorAll('details').forEach(d=> d.open=false); });
+    }
+
+    // Sincronização
+    map.on('layeradd', ()=>{ updateActiveLayersDisplay(); updateLegendVisibility(); for (const name in loadedLayers){ const cb = document.querySelector(`[data-layer-name="${name}"]`); if (cb) cb.checked = map.hasLayer(loadedLayers[name]); } });
+    map.on('layerremove', (e)=>{ if (e.layer && e.layer.eachLayer) clearSelectionForLayer(e.layer); updateActiveLayersDisplay(); updateLegendVisibility(); for (const name in loadedLayers){ const cb=document.querySelector(`[data-layer-name="${name}"]`); if (cb) cb.checked = map.hasLayer(loadedLayers[name]); } });
+
+    // Ações seleção listagem
+    selectedFeaturesList.addEventListener('click', (e)=>{
+      const target = e.target.closest('button'); if(!target) return;
+      const listItem = target.closest('[data-layer-id]'); const layerId = listItem?.dataset.layerId; if(!layerId) return;
+      let layerToAct; for (const l of selectedLayers) if (String(l._leaflet_id)===String(layerId)){ layerToAct=l; break; }
+      if (!layerToAct) return;
+      if (target.classList.contains('zoom-to-feature')){ if(layerToAct.getBounds && layerToAct.getBounds().isValid()) map.fitBounds(layerToAct.getBounds().pad(0.1)); }
+      else if (target.classList.contains('remove-from-selection')){ if(layerToAct.setStyle) layerToAct.setStyle(layerToAct.defaultStyle); selectedLayers.delete(layerToAct); updateSelectedFeaturesList(); updateInfoPanel(); }
+    });
+
+    individualDetailsContainer.addEventListener('click', (e)=>{
+      const button = e.target.closest('button'); if(!button) return; const layerId = button.dataset.layerId; let layerToExport;
+      for (const l of selectedLayers) if (String(l._leaflet_id)===String(layerId)){ layerToExport=l; break; }
+      if (!layerToExport) return; const id = getIdentifier(layerToExport.feature.properties);
+      if (button.classList.contains('export-individual-csv-button')) exportSelectionToCSV(`propriedades_${sanitizeFilename(String(id))}.csv`, [layerToExport]);
+      else if (button.classList.contains('export-individual-kml-button')) exportSelectionToKML(`elemento_${sanitizeFilename(String(id))}.kml`, [layerToExport]);
+    });
+
+    // Export principais
+    exportCsvButton.addEventListener('click', ()=>{ const id = selectedLayers.size>0? getIdentifier(Array.from(selectedLayers)[0].feature.properties) : 'selecao'; exportSelectionToCSV(`selecao_${sanitizeFilename(String(id))}.csv`); });
+    exportKmlButton.addEventListener('click', ()=>{ const id = selectedLayers.size>0? getIdentifier(Array.from(selectedLayers)[0].feature.properties) : 'selecao'; exportSelectionToKML(`selecao_${sanitizeFilename(String(id))}.kml`); });
+
+    // ---------- Boot ----------
+    async function boot(){
+      // Inicia o download dos crimes em background
+      loadCrimeDataBackground();
+      
+      buildLayerControl();
+      // Modificado para carregar NM_MUN como padrão, se existir
+      const first = dataSources.find(s=> s.name==='Municipios') || dataSources[0];
+      try{
+        const l = await ensureLayerLoaded(first);
+        map.addLayer(l);
+        const cb = document.querySelector(`[data-layer-name="${first.name}"]`);
+        if (cb) cb.checked = true;
+        const b=l.getBounds?.(); if(b && b.isValid()) map.fitBounds(b.pad(0.05));
+        statusEl.textContent = `Camada inicial pronta.`;
+      }catch(e){ console.error(e); statusEl.textContent = `Erro ao carregar a camada inicial.`; }
+      finally{ loadingOverlay.style.display='none'; updateActiveLayersDisplay(); updateLegendVisibility(); }
+    }
+    boot();
+  </script>
+</body>
+</html>
